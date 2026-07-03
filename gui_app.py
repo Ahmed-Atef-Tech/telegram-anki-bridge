@@ -256,6 +256,7 @@ class ImportInterface(QWidget):
         self.text_edit = TextEdit()
         self.text_edit.setPlaceholderText("Front,Back,tags\nFront 2,Back 2")
         self.text_edit.setMinimumHeight(220)
+        self.text_edit.setStyleSheet("QTextEdit { color: white; }")
         layout.addWidget(self.text_edit, 1)
 
         btn_row = QHBoxLayout()
@@ -339,6 +340,9 @@ class ImportInterface(QWidget):
         item = {"chat_id": None, "deck": deck, "notes": notes, "source": self._source_name, "source_type": "local_import"}
         self.window().review_interface.set_items([item], None)
         self.window().switchTo(self.window().review_interface)
+
+        self.text_edit.clear()
+        self._source_name = "Local import"
 
 
 class HistoryInterface(QWidget):

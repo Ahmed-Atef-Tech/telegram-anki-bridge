@@ -6,7 +6,7 @@ updater.py
 
 import requests
 
-APP_VERSION = "1.2.0"
+APP_VERSION = "1.2.1"
 GITHUB_REPO = "Ahmed-Atef-Tech/telegram-anki-bridge"
 
 
