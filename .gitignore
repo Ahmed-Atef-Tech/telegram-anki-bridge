@@ -1,0 +1,8 @@
+.env
+__pycache__/
+*.pyc
+build/
+dist/
+*.exe
+bridge.log
+telegram_offset.txt

@@ -1,0 +1,4 @@
+requests>=2.31
+python-dotenv>=1.0
+PyQt6>=6.9
+PyQt6-Fluent-Widgets>=1.11
