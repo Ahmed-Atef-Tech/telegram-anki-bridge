@@ -10,7 +10,7 @@ import re
 _ARABIC_RE = re.compile(r"[؀-ۿݐ-ݿࢠ-ࣿﭐ-﷿ﹰ-﻿]")
 
 STRINGS = {
-    "window_title": "Telegram → Anki Bridge",
+    "window_title": "Anki Inbox",
     "nav_review": "Review",
     "nav_settings": "Settings",
     "review_title": "{n} new message(s) with cards",

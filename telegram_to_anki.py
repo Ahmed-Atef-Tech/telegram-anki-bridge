@@ -444,7 +444,7 @@ def commit_items(items) -> tuple:
 def main() -> None:
     setup_logging()
     log.info("=" * 50)
-    log.info("🔍 بدء تشغيل Telegram → Anki Bridge")
+    log.info("🔍 بدء تشغيل Anki Inbox")
 
     if "--startup" in sys.argv:
         log.info(f"⏳ استنى {config.STARTUP_DELAY_SEC} ثانية عشان النت وويندوز يستقروا بعد تسجيل الدخول...")

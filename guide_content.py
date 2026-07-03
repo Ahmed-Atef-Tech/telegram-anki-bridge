@@ -5,20 +5,23 @@ guide_content.py
 عشان gui_app.py يفضل قابل للقراءة.
 """
 
-WELCOME_TEXT = """Welcome to Telegram → Anki Bridge!
+WELCOME_TEXT = """Welcome to Anki Inbox!
 
 THE PROBLEM THIS SOLVES
-You're reading something on your phone - a book, an article, a lecture - and you
-want to turn a fact into an Anki flashcard right now, without opening a laptop,
-opening Anki, and typing it in manually. This app lets you just send a message
-to a private Telegram bot, and the card appears in your Anki deck automatically.
+You're reading something - on your phone or your laptop - and want to turn a
+fact into an Anki flashcard right now, without opening Anki and typing it in
+manually. Send a message to a private Telegram bot from your phone, or paste/
+drop a file into the Import tab on your laptop, and the card appears in your
+Anki deck automatically.
 
 HOW TO USE IT
-1. Open Telegram on your phone and message your bot with a card, like this:
+1. From your phone: message your Telegram bot with a card, like this:
      Question,Answer
+   From your laptop: use the Import tab the same way (paste, browse, or
+   drag-and-drop a .csv/.txt/.tsv file).
    You can send several cards at once (one per line), and optionally add tags:
      Question,Answer,tag1 tag2
-   You can also override the deck/note type for that message by adding these
+   You can also override the deck/note type for that batch by adding these
    as the first lines:
      #deck: My Deck Name
      #notetype: Basic
@@ -27,9 +30,6 @@ HOW TO USE IT
    can open it manually anytime. If it finds new cards, it shows you a Review
    screen so you approve or reject before anything is saved to Anki. Turn on
    "Auto Mode" in Settings if you'd rather it save automatically with no review.
-
-3. You can also send a .csv/.txt/.tsv file as an attachment instead of typing
-   in the message - handy for long lists of cards.
 
 SETTING UP YOUR OWN BOT (only needed once, already done for you)
 1. Open Telegram, search for @BotFather.
@@ -40,7 +40,7 @@ SETTING UP YOUR OWN BOT (only needed once, already done for you)
 
 Check the Guide tab any time you need this again - it also has ready-made
 prompts you can copy into ChatGPT/Claude/Gemini to turn any text into
-correctly formatted cards for this bot.
+correctly formatted cards.
 """
 
 GUIDE_SECTIONS = [

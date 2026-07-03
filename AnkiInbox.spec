@@ -33,7 +33,7 @@ exe = EXE(
     a.binaries,
     a.datas,
     [],
-    name='TelegramAnkiBridge',
+    name='AnkiInbox',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -46,5 +46,5 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon=['icons8-anki-480.ico'],
+    icon=['app_icon.ico'],
 )

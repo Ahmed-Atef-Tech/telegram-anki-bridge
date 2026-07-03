@@ -1,7 +1,7 @@
 """
 gui_app.py
 ----------
-واجهة Fluent (Windows 11 style) لبرنامج Telegram → Anki Bridge.
+واجهة Fluent (Windows 11 style) لبرنامج Anki Inbox (تحويل رسايل تيليجرام وملفات محلية لكروت Anki).
 
 - شاشة "المراجعة": بتظهر لو فيه كروت جديدة جاهزة، وتسيبك توافق أو ترفض قبل الحفظ.
 - شاشة "الإعدادات": تعديل الديك الافتراضي، النوت تايب، بيانات البوت، ووضع Auto Mode.
@@ -26,6 +26,7 @@ from PyQt6.QtWidgets import (
     QFileDialog,
     QHBoxLayout,
     QMenu,
+    QSizePolicy,
     QSystemTrayIcon,
     QVBoxLayout,
     QWidget,
@@ -78,10 +79,16 @@ class UpdateCheckWorker(QThread):
         self.result_ready.emit(result)
 
 
+def _set_wrapping(label) -> None:
+    """بيخلي الـ QLabel يلف النص فعليًا مع عرض الحاوية، بدل ما يفرض عرضه الأصلي (من غير كده wordWrap لوحده مش كفاية جوا ScrollArea)."""
+    label.setWordWrap(True)
+    label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+
+
 def _content_label(text: str) -> BodyLabel:
     """QLabel بيتحدد اتجاهه ومحاذاته حسب اللغة الفعلية للنص (عربي أو إنجليزي)."""
     lbl = BodyLabel(text)
-    lbl.setWordWrap(True)
+    _set_wrapping(lbl)
     if is_rtl_text(text):
         lbl.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
         lbl.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
@@ -112,6 +119,7 @@ class ReviewInterface(QWidget):
 
         self.scroll = ScrollArea()
         self.scroll.setWidgetResizable(True)
+        self.scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         layout.addWidget(self.scroll, 1)
 
         btn_row = QHBoxLayout()
@@ -242,7 +250,7 @@ class ImportInterface(QWidget):
             "this window. The same #deck:/#notetype: header lines and tag-column rules apply here "
             "as in Telegram messages."
         )
-        caption.setWordWrap(True)
+        _set_wrapping(caption)
         layout.addWidget(caption)
 
         self.text_edit = TextEdit()
@@ -356,6 +364,7 @@ class HistoryInterface(QWidget):
 
         self.scroll = ScrollArea()
         self.scroll.setWidgetResizable(True)
+        self.scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         layout.addWidget(self.scroll, 1)
 
         self.refresh()
@@ -389,7 +398,7 @@ class HistoryInterface(QWidget):
         if entry.get("source"):
             subtitle += f" - {entry['source']}"
         caption = CaptionLabel(subtitle)
-        caption.setWordWrap(True)
+        _set_wrapping(caption)
         text_col.addWidget(caption)
         h.addLayout(text_col, 1)
 
@@ -506,8 +515,7 @@ class SettingsInterface(QWidget):
         guide_row = CardWidget()
         guide_layout = QHBoxLayout(guide_row)
         guide_layout.setContentsMargins(16, 12, 16, 12)
-        guide_layout.addWidget(BodyLabel("New here? The Guide tab explains how this all works."))
-        guide_layout.addStretch(1)
+        guide_layout.addWidget(BodyLabel("New here? The Guide tab explains how this all works."), 1)
         open_guide_btn = PushButton(FluentIcon.HELP, "Open Guide")
         open_guide_btn.setAutoDefault(False)
         open_guide_btn.setDefault(False)
@@ -520,9 +528,10 @@ class SettingsInterface(QWidget):
         auto_layout.setContentsMargins(16, 12, 16, 12)
         auto_text = QVBoxLayout()
         auto_text.addWidget(StrongBodyLabel(t("auto_mode_title")))
-        auto_text.addWidget(CaptionLabel(t("auto_mode_desc")))
-        auto_layout.addLayout(auto_text)
-        auto_layout.addStretch(1)
+        auto_desc = CaptionLabel(t("auto_mode_desc"))
+        _set_wrapping(auto_desc)
+        auto_text.addWidget(auto_desc)
+        auto_layout.addLayout(auto_text, 1)
         auto_layout.addWidget(self.auto_mode_switch)
         layout.addWidget(auto_row)
 
@@ -531,9 +540,10 @@ class SettingsInterface(QWidget):
         html_layout.setContentsMargins(16, 12, 16, 12)
         html_text = QVBoxLayout()
         html_text.addWidget(StrongBodyLabel("Allow HTML in fields"))
-        html_text.addWidget(CaptionLabel("When off, characters like < > & are escaped so they show as plain text instead of being treated as HTML."))
-        html_layout.addLayout(html_text)
-        html_layout.addStretch(1)
+        html_caption = CaptionLabel("When off, characters like < > & are escaped so they show as plain text instead of being treated as HTML.")
+        _set_wrapping(html_caption)
+        html_text.addWidget(html_caption)
+        html_layout.addLayout(html_text, 1)
         html_layout.addWidget(self.allow_html_switch)
         layout.addWidget(html_row)
 
@@ -636,7 +646,7 @@ class AboutInterface(QWidget):
         layout.setSpacing(6)
 
         layout.addWidget(TitleLabel("About"))
-        layout.addWidget(CaptionLabel(f"Telegram → Anki Bridge v{updater.APP_VERSION} - built by Ahmed Atef"))
+        layout.addWidget(CaptionLabel(f"Anki Inbox v{updater.APP_VERSION} - built by Ahmed Atef"))
         layout.addSpacing(6)
 
         self.update_row = CardWidget()
@@ -689,6 +699,7 @@ class GuideInterface(QWidget):
 
         scroll = ScrollArea()
         scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         content = QWidget()
         layout = QVBoxLayout(content)
         layout.setSpacing(10)
@@ -697,12 +708,12 @@ class GuideInterface(QWidget):
             layout.addWidget(self._section_card(heading, body))
 
         layout.addWidget(SubtitleLabel("Copy a prompt for AI card generation"))
-        layout.addWidget(
-            CaptionLabel(
-                "Paste your study material into ChatGPT/Claude/Gemini after one of these "
-                "prompts, then paste the AI's output straight into your Telegram bot."
-            )
+        prompts_intro = CaptionLabel(
+            "Paste your study material into ChatGPT/Claude/Gemini after one of these "
+            "prompts, then paste the AI's output straight into your Telegram bot."
         )
+        _set_wrapping(prompts_intro)
+        layout.addWidget(prompts_intro)
         for name, desc, prompt_text in PROMPTS:
             layout.addWidget(self._prompt_card(name, desc, prompt_text))
 
@@ -717,7 +728,7 @@ class GuideInterface(QWidget):
         v.setSpacing(4)
         v.addWidget(StrongBodyLabel(heading))
         body_label = BodyLabel(body)
-        body_label.setWordWrap(True)
+        _set_wrapping(body_label)
         v.addWidget(body_label)
         return card
 
@@ -729,7 +740,7 @@ class GuideInterface(QWidget):
         text_col = QVBoxLayout()
         text_col.addWidget(StrongBodyLabel(name))
         caption = CaptionLabel(desc)
-        caption.setWordWrap(True)
+        _set_wrapping(caption)
         text_col.addWidget(caption)
         h.addLayout(text_col, 1)
 
@@ -748,7 +759,7 @@ class WelcomeDialog(MessageBoxBase):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.titleLabel = SubtitleLabel("Welcome to Telegram → Anki Bridge", self)
+        self.titleLabel = SubtitleLabel("Welcome to Anki Inbox", self)
         self.contentEdit = TextEdit(self)
         self.contentEdit.setPlainText(WELCOME_TEXT)
         self.contentEdit.setReadOnly(True)
@@ -768,7 +779,7 @@ class MainWindow(FluentWindow):
         self.setWindowTitle(t("window_title"))
         self.resize(760, 580)
 
-        icon_path = config.BASE_DIR / "icons8-anki-480.ico"
+        icon_path = config.BASE_DIR / "app_icon.ico"
         if icon_path.exists():
             self.setWindowIcon(QIcon(str(icon_path)))
 
@@ -783,7 +794,7 @@ class MainWindow(FluentWindow):
             self.review_interface.set_items(items, new_offset)
 
         self.addSubInterface(self.review_interface, FluentIcon.SYNC, t("nav_review"))
-        self.addSubInterface(self.import_interface, FluentIcon.FOLDER, "Import")
+        self.addSubInterface(self.import_interface, FluentIcon.ADD, "Import")
         self.addSubInterface(self.history_interface, FluentIcon.HISTORY, "History")
         self.addSubInterface(self.guide_interface, FluentIcon.BOOK_SHELF, "Guide")
         self.addSubInterface(self.settings_interface, FluentIcon.SETTING, t("nav_settings"), NavigationItemPosition.BOTTOM)
@@ -815,7 +826,7 @@ class MainWindow(FluentWindow):
         self.tray_icon.messageClicked.connect(self._open_update_url)
         self.tray_icon.showMessage(
             "Update available",
-            f"Telegram → Anki Bridge {version} is available - click to download.",
+            f"Anki Inbox {version} is available - click to download.",
             QSystemTrayIcon.MessageIcon.Information,
             8000,
         )
@@ -875,7 +886,7 @@ class MainWindow(FluentWindow):
 def main() -> None:
     bridge.setup_logging()
     bridge.log.info("=" * 50)
-    bridge.log.info("🖥️  بدء تشغيل Telegram → Anki Bridge (GUI)")
+    bridge.log.info("🖥️  بدء تشغيل Anki Inbox (GUI)")
 
     is_startup_launch = "--startup" in sys.argv
     if is_startup_launch:
