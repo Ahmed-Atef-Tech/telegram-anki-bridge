@@ -69,6 +69,21 @@ GUIDE_SECTIONS = [
         "Auto Mode (Settings) to skip the review screen and save automatically.",
     ),
     (
+        "Importing from your laptop",
+        "Use the Import tab to add cards straight from your PC - paste CSV/TSV text, browse for "
+        "a file, or drag-and-drop a .csv/.txt/.tsv file onto the window. It goes through the same "
+        "Review screen as Telegram messages before anything is saved.",
+    ),
+    (
+        "Duplicate handling & History",
+        "Settings > Duplicate Handling controls what happens when a card already exists: "
+        "Preserve skips it, Update overwrites the existing card's fields, and Duplicate always "
+        "adds a new copy. Match Scope decides whether \"already exists\" is checked within the "
+        "target deck or across your whole collection. Every batch you save shows up in the "
+        "History tab, where you can jump to those cards in Anki's Browser or delete the whole "
+        "batch in one click.",
+    ),
+    (
         "Setting up a Telegram bot (already done for you)",
         "1. Open Telegram, search @BotFather.\n"
         "2. Send /newbot, give it a name, then a username ending in \"bot\".\n"

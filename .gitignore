@@ -6,3 +6,4 @@ dist/
 *.exe
 bridge.log
 telegram_offset.txt
+import_history.json

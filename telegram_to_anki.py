@@ -14,6 +14,9 @@ telegram_to_anki.py
 """
 
 import csv
+import datetime
+import html as html_module
+import json
 import logging
 import subprocess
 import sys
@@ -129,16 +132,25 @@ def get_model_field_names(notetype: str):
     return field_names
 
 
-def parse_csv_text_to_notes(text: str, deck: str, notetype: str):
+def detect_delimiter(sample_line: str) -> str:
+    """بيدور على أكتر فاصل (فاصلة/تاب/فاصلة منقوطة) اتكرر في السطر."""
+    candidates = {"\t": sample_line.count("\t"), ",": sample_line.count(","), ";": sample_line.count(";")}
+    best = max(candidates, key=candidates.get)
+    return best if candidates[best] > 0 else ","
+
+
+def parse_csv_text_to_notes(text: str, deck: str, notetype: str, skip_header: bool = False):
     deck = resolve_deck_name(deck)
     notetype = resolve_notetype_name(notetype)
     field_names = get_model_field_names(notetype)
 
     data_lines = [line for line in text.strip().splitlines() if line.strip() and not line.strip().startswith("#")]
+    if skip_header and data_lines:
+        data_lines = data_lines[1:]
     if not data_lines:
         return [], deck
 
-    delimiter = "\t" if "\t" in data_lines[0] else ","
+    delimiter = detect_delimiter(data_lines[0])
     reader = csv.reader(data_lines, delimiter=delimiter)
 
     notes = []
@@ -147,9 +159,13 @@ def parse_csv_text_to_notes(text: str, deck: str, notetype: str):
         if len(row) < 2 or not row[0] or not row[1]:
             continue
 
+        front, back = row[0], row[1]
+        if not config.ALLOW_HTML:
+            front, back = html_module.escape(front, quote=False), html_module.escape(back, quote=False)
+
         # العقد: العمود الأول = أول حقل في النوت تايب، التاني = تاني حقل،
         # التالت (لو موجود) = tags. أي حقول زيادة في النوت تايب بتفضل فاضية.
-        fields = {field_names[0]: row[0], field_names[1]: row[1]}
+        fields = {field_names[0]: front, field_names[1]: back}
         tags = row[2].split() if len(row) > 2 and row[2] else []
 
         notes.append(
@@ -164,7 +180,7 @@ def parse_csv_text_to_notes(text: str, deck: str, notetype: str):
     return notes, deck
 
 
-def parse_message_to_notes(text: str):
+def parse_message_to_notes(text: str, skip_header: bool = False):
     """بيحول نص رسالة (CSV أو TSV، مع هيدرز اختيارية #deck: / #notetype:) لقائمة نوتس لـ AnkiConnect."""
     deck = config.DEFAULT_DECK
     notetype = config.DEFAULT_NOTE_TYPE
@@ -184,7 +200,7 @@ def parse_message_to_notes(text: str):
         else:
             data_lines.append(raw_line)
 
-    notes, deck = parse_csv_text_to_notes("\n".join(data_lines), deck, notetype)
+    notes, deck = parse_csv_text_to_notes("\n".join(data_lines), deck, notetype, skip_header=skip_header)
     return notes, deck
 
 
@@ -289,23 +305,113 @@ def fetch_pending_items(offset: int):
             log.info("ℹ️  الرسالة دي مفيهاش كروت CSV/TSV صالحة - اتجاهلت.")
             continue
 
-        items.append({"chat_id": chat_id, "deck": deck, "notes": notes, "source": source})
+        items.append({"chat_id": chat_id, "deck": deck, "notes": notes, "source": source, "source_type": "telegram"})
 
     return items, new_offset
 
 
+def _quoted(value: str) -> str:
+    return '"' + value.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
+def _field_search_term(field_name: str, value: str) -> str:
+    """بيبني شرط بحث Anki لحقل معين، ملفوف في quotes زي ما موثّق في صفحة البحث بتاعت Anki."""
+    combined = f"{field_name}:{value}"
+    return '"' + combined.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
+def find_duplicate_note_id(notetype: str, deck: str, front_field: str, front_value: str, match_scope: str):
+    parts = [f"note:{_quoted(notetype)}", _field_search_term(front_field, front_value)]
+    if match_scope == "notetype_deck":
+        parts.insert(0, f"deck:{_quoted(deck)}")
+    ids = anki_request("findNotes", query=" ".join(parts))
+    return ids[0] if ids else None
+
+
+def _add_or_update_note(note: dict, match_scope: str):
+    """بيدور على نوت مطابق وبيحدّثه لو لقاه، وإلا بيضيف واحد جديد. بيرجع (note_id أو None, "updated"/"added"/"failed")."""
+    front_field = next(iter(note["fields"]))
+    front_value = note["fields"][front_field]
+    existing_id = find_duplicate_note_id(note["modelName"], note["deckName"], front_field, front_value, match_scope)
+
+    if existing_id:
+        anki_request("updateNoteFields", note={"id": existing_id, "fields": note["fields"]})
+        if note["tags"]:
+            anki_request("addTags", notes=[existing_id], tags=" ".join(note["tags"]))
+        return existing_id, "updated"
+
+    note_copy = dict(note, options={"allowDuplicate": True})
+    new_id = anki_request("addNote", note=note_copy)
+    return new_id, ("added" if new_id else "failed")
+
+
+def load_history():
+    if config.HISTORY_FILE.exists():
+        try:
+            return json.loads(config.HISTORY_FILE.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            return []
+    return []
+
+
+def _save_history(entries) -> None:
+    config.HISTORY_FILE.write_text(json.dumps(entries[-200:], ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def _append_history_entry(entry: dict) -> None:
+    entries = load_history()
+    entries.append(entry)
+    _save_history(entries)
+
+
+def delete_history_batch(note_ids: list) -> None:
+    """بيمسح الكروت دي من Anki، وبيشيل أي history entries بتشاور عليها."""
+    if note_ids:
+        anki_request("deleteNotes", notes=note_ids)
+    entries = load_history()
+    id_set = set(note_ids)
+    for entry in entries:
+        entry["note_ids"] = [nid for nid in entry.get("note_ids", []) if nid not in id_set]
+    entries = [e for e in entries if e.get("note_ids") or e.get("added", 0) == 0]
+    _save_history(entries)
+
+
 def commit_items(items) -> tuple:
-    """بيحفظ الآيتمز في Anki، وبيبعت تأكيد لكل chat_id. بيرجع (كروت اتضافت, كروت كلها)."""
+    """بيحفظ الآيتمز في Anki (حسب DUPLICATE_MODE/MATCH_SCOPE)، بيسجل history، وبيبعت تأكيد لكل chat_id. بيرجع (كروت اتضافت, كروت كلها)."""
     total_success = 0
     total_notes = 0
     per_chat_messages = {}
 
-    for item in items:
-        deck, notes, chat_id = item["deck"], item["notes"], item["chat_id"]
+    duplicate_mode = config.DUPLICATE_MODE
+    match_scope = config.MATCH_SCOPE
+    anki_duplicate_scope = "deck" if match_scope == "notetype_deck" else None
 
+    for item in items:
+        deck, notes, chat_id = item["deck"], item["notes"], item.get("chat_id")
         ensure_deck_exists(deck)
-        added = anki_request("addNotes", notes=notes)
-        success = sum(1 for x in added if x is not None)
+
+        note_ids = []
+        if duplicate_mode == "update":
+            success = 0
+            for note in notes:
+                try:
+                    note_id, status = _add_or_update_note(note, match_scope)
+                except Exception as e:
+                    log.warning(f"⚠️  فشل إضافة/تحديث كارت: {e}")
+                    continue
+                if note_id:
+                    success += 1
+                    note_ids.append(note_id)
+        else:
+            allow_dup = duplicate_mode == "duplicate"
+            for note in notes:
+                note["options"] = {"allowDuplicate": allow_dup}
+                if anki_duplicate_scope:
+                    note["options"]["duplicateScope"] = anki_duplicate_scope
+            added = anki_request("addNotes", notes=notes)
+            note_ids = [nid for nid in added if nid is not None]
+            success = len(note_ids)
+
         total_success += success
         total_notes += len(notes)
 
@@ -313,7 +419,21 @@ def commit_items(items) -> tuple:
         if success < len(notes):
             msg += f" ({len(notes) - success} اتجاهلوا، غالبًا duplicates)"
         log.info(msg)
-        per_chat_messages.setdefault(chat_id, []).append(msg)
+        if chat_id is not None:
+            per_chat_messages.setdefault(chat_id, []).append(msg)
+
+        _append_history_entry(
+            {
+                "timestamp": datetime.datetime.now().isoformat(timespec="seconds"),
+                "source_type": item.get("source_type", "telegram"),
+                "source": item.get("source", ""),
+                "deck": deck,
+                "notetype": notes[0]["modelName"] if notes else "",
+                "requested": len(notes),
+                "added": success,
+                "note_ids": note_ids,
+            }
+        )
 
     for chat_id, msgs in per_chat_messages.items():
         send_telegram_message(chat_id, "\n".join(msgs))

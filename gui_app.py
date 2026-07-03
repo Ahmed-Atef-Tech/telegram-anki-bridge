@@ -16,12 +16,14 @@ gui_app.py
 """
 
 import sys
+from pathlib import Path
 
 from PyQt6.QtCore import Qt, QThread, QTimer, QUrl, pyqtSignal
 from PyQt6.QtGui import QDesktopServices, QIcon
 from PyQt6.QtWidgets import (
     QApplication,
     QCheckBox,
+    QFileDialog,
     QHBoxLayout,
     QMenu,
     QSystemTrayIcon,
@@ -32,6 +34,7 @@ from qfluentwidgets import (
     BodyLabel,
     CardWidget,
     CaptionLabel,
+    ComboBox,
     EditableComboBox,
     FluentIcon,
     FluentWindow,
@@ -89,34 +92,27 @@ def _content_label(text: str) -> BodyLabel:
 
 
 class ReviewInterface(QWidget):
-    """شاشة مراجعة الكروت الجديدة قبل ما تتحفظ في Anki."""
+    """شاشة مراجعة الكروت الجديدة قبل ما تتحفظ في Anki - بتتحدّث ديناميكيًا (set_items) من تيليجرام أو من تاب Import."""
 
-    def __init__(self, items, new_offset, parent=None):
+    def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName("ReviewInterface")
-        self.items = items
-        self.new_offset = new_offset
+        self.items = []
+        self.new_offset = None
         self.checkboxes = []
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(30, 20, 30, 20)
         layout.setSpacing(12)
 
-        layout.addWidget(TitleLabel(t("review_title", n=len(items))))
-        layout.addWidget(CaptionLabel(t("review_subtitle")))
+        self.title_label = TitleLabel("")
+        self.subtitle_label = CaptionLabel("")
+        layout.addWidget(self.title_label)
+        layout.addWidget(self.subtitle_label)
 
-        scroll = ScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll_content = QWidget()
-        scroll_layout = QVBoxLayout(scroll_content)
-        scroll_layout.setSpacing(10)
-
-        for item in items:
-            card = self._build_item_card(item)
-            scroll_layout.addWidget(card)
-        scroll_layout.addStretch(1)
-        scroll.setWidget(scroll_content)
-        layout.addWidget(scroll, 1)
+        self.scroll = ScrollArea()
+        self.scroll.setWidgetResizable(True)
+        layout.addWidget(self.scroll, 1)
 
         btn_row = QHBoxLayout()
         self.save_btn = PrimaryPushButton(FluentIcon.SAVE, t("btn_save"))
@@ -131,6 +127,32 @@ class ReviewInterface(QWidget):
         btn_row.addWidget(self.discard_btn)
         btn_row.addWidget(self.save_btn)
         layout.addLayout(btn_row)
+
+        self.set_items([], None)
+
+    def set_items(self, items, new_offset) -> None:
+        """بيحدّث الشاشة بمجموعة كروت جديدة تتراجع - سواء جايه من تيليجرام أو من استيراد محلي."""
+        self.items = items
+        self.new_offset = new_offset
+        self.checkboxes = []
+
+        if items:
+            self.title_label.setText(t("review_title", n=len(items)))
+            self.subtitle_label.setText(t("review_subtitle"))
+        else:
+            self.title_label.setText("No cards to review")
+            self.subtitle_label.setText("New cards from Telegram or a local import will show up here.")
+
+        scroll_content = QWidget()
+        scroll_layout = QVBoxLayout(scroll_content)
+        scroll_layout.setSpacing(10)
+        for item in items:
+            scroll_layout.addWidget(self._build_item_card(item))
+        scroll_layout.addStretch(1)
+        self.scroll.setWidget(scroll_content)
+
+        self.save_btn.setEnabled(bool(items))
+        self.discard_btn.setEnabled(bool(items))
 
     def _build_item_card(self, item) -> CardWidget:
         card = CardWidget()
@@ -173,9 +195,10 @@ class ReviewInterface(QWidget):
     def on_discard(self):
         box = MessageBox(t("discard_confirm_title"), t("discard_confirm_body"), self.window())
         if box.exec():
-            bridge.save_offset(self.new_offset)
+            if self.new_offset is not None:
+                bridge.save_offset(self.new_offset)
             InfoBar.success(t("discard_done_title"), t("discard_done_body"), position=InfoBarPosition.TOP, parent=self.window())
-            self.window().close()
+            self.set_items([], None)
 
     def on_save(self):
         approved = [item for checkbox, item in self.checkboxes if checkbox.isChecked()]
@@ -189,15 +212,235 @@ class ReviewInterface(QWidget):
             InfoBar.error(t("save_error_title"), t("save_error_body", error=e), position=InfoBarPosition.TOP, parent=self.window())
             return
 
-        bridge.save_offset(self.new_offset)
+        if self.new_offset is not None:
+            bridge.save_offset(self.new_offset)
         InfoBar.success(
             t("save_success_title"),
             t("save_success_body", success=success, total=total),
             position=InfoBarPosition.TOP,
             parent=self.window(),
         )
-        self.save_btn.setEnabled(False)
-        self.discard_btn.setEnabled(False)
+        self.set_items([], None)
+
+
+class ImportInterface(QWidget):
+    """استيراد كروت من ملف CSV/TSV محلي، لصق clipboard، أو سحب وإفلات - من اللاب مباشرة."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setObjectName("ImportInterface")
+        self.setAcceptDrops(True)
+        self._source_name = "Local import"
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(30, 20, 30, 20)
+        layout.setSpacing(12)
+
+        layout.addWidget(TitleLabel("Import"))
+        caption = CaptionLabel(
+            "Paste CSV/TSV text below, browse a file, or drag-and-drop a .csv/.txt/.tsv file onto "
+            "this window. The same #deck:/#notetype: header lines and tag-column rules apply here "
+            "as in Telegram messages."
+        )
+        caption.setWordWrap(True)
+        layout.addWidget(caption)
+
+        self.text_edit = TextEdit()
+        self.text_edit.setPlaceholderText("Front,Back,tags\nFront 2,Back 2")
+        self.text_edit.setMinimumHeight(220)
+        layout.addWidget(self.text_edit, 1)
+
+        btn_row = QHBoxLayout()
+        browse_btn = PushButton(FluentIcon.FOLDER, "Browse File...")
+        browse_btn.setAutoDefault(False)
+        browse_btn.setDefault(False)
+        browse_btn.clicked.connect(self.on_browse)
+        paste_btn = PushButton(FluentIcon.PASTE, "Paste from Clipboard")
+        paste_btn.setAutoDefault(False)
+        paste_btn.setDefault(False)
+        paste_btn.clicked.connect(self.on_paste_clipboard)
+        btn_row.addWidget(browse_btn)
+        btn_row.addWidget(paste_btn)
+        btn_row.addStretch(1)
+        layout.addLayout(btn_row)
+
+        options_row = CardWidget()
+        options_layout = QHBoxLayout(options_row)
+        options_layout.setContentsMargins(16, 10, 16, 10)
+        self.header_checkbox = QCheckBox("First row is a header (skip it)")
+        options_layout.addWidget(self.header_checkbox)
+        options_layout.addStretch(1)
+        layout.addWidget(options_row)
+
+        preview_btn = PrimaryPushButton(FluentIcon.VIEW, "Preview & Review")
+        preview_btn.setAutoDefault(False)
+        preview_btn.setDefault(False)
+        preview_btn.clicked.connect(self.on_preview)
+        layout.addWidget(preview_btn, 0, Qt.AlignmentFlag.AlignLeft)
+
+    def on_browse(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Select a CSV/TSV/TXT file", "", "Card files (*.csv *.tsv *.txt);;All files (*.*)"
+        )
+        if path:
+            self._load_file(Path(path))
+
+    def _load_file(self, path: Path) -> None:
+        try:
+            text = path.read_text(encoding="utf-8-sig", errors="replace")
+        except OSError as e:
+            InfoBar.error("Error", f"Couldn't read file: {e}", position=InfoBarPosition.TOP, parent=self.window())
+            return
+        self.text_edit.setPlainText(text)
+        self._source_name = path.name
+        InfoBar.success("Loaded", f"Loaded {path.name} - click Preview & Review to continue.", position=InfoBarPosition.TOP, parent=self.window())
+
+    def on_paste_clipboard(self) -> None:
+        text = QApplication.clipboard().text()
+        if not text.strip():
+            InfoBar.warning("Empty clipboard", "Nothing to paste - copy some CSV/TSV text first.", position=InfoBarPosition.TOP, parent=self.window())
+            return
+        self.text_edit.setPlainText(text)
+        self._source_name = "Pasted from clipboard"
+
+    def dragEnterEvent(self, event) -> None:
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+
+    def dropEvent(self, event) -> None:
+        urls = event.mimeData().urls()
+        if urls:
+            self._load_file(Path(urls[0].toLocalFile()))
+
+    def on_preview(self) -> None:
+        text = self.text_edit.toPlainText()
+        if not text.strip():
+            InfoBar.warning("Nothing to import", "Paste or load some CSV/TSV content first.", position=InfoBarPosition.TOP, parent=self.window())
+            return
+
+        try:
+            notes, deck = bridge.parse_message_to_notes(text, skip_header=self.header_checkbox.isChecked())
+        except Exception as e:
+            InfoBar.error("Parse error", str(e), position=InfoBarPosition.TOP, parent=self.window())
+            return
+
+        if not notes:
+            InfoBar.warning("No valid cards", "Couldn't find any valid rows in that text.", position=InfoBarPosition.TOP, parent=self.window())
+            return
+
+        item = {"chat_id": None, "deck": deck, "notes": notes, "source": self._source_name, "source_type": "local_import"}
+        self.window().review_interface.set_items([item], None)
+        self.window().switchTo(self.window().review_interface)
+
+
+class HistoryInterface(QWidget):
+    """سجل الدفعات اللي اتحفظت (من تيليجرام أو استيراد محلي) - استعراض في Anki أو حذف."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setObjectName("HistoryInterface")
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(30, 20, 30, 20)
+        layout.setSpacing(12)
+
+        header_row = QHBoxLayout()
+        header_row.addWidget(TitleLabel("History"))
+        header_row.addStretch(1)
+        refresh_btn = PushButton(FluentIcon.SYNC, "Refresh")
+        refresh_btn.setAutoDefault(False)
+        refresh_btn.setDefault(False)
+        refresh_btn.clicked.connect(self.refresh)
+        header_row.addWidget(refresh_btn)
+        layout.addLayout(header_row)
+
+        self.scroll = ScrollArea()
+        self.scroll.setWidgetResizable(True)
+        layout.addWidget(self.scroll, 1)
+
+        self.refresh()
+
+    def refresh(self) -> None:
+        entries = list(reversed(bridge.load_history()))[:50]
+
+        content = QWidget()
+        v = QVBoxLayout(content)
+        v.setSpacing(10)
+
+        if not entries:
+            v.addWidget(CaptionLabel("No import history yet."))
+        for entry in entries:
+            v.addWidget(self._entry_card(entry))
+        v.addStretch(1)
+        self.scroll.setWidget(content)
+
+    def _entry_card(self, entry: dict) -> CardWidget:
+        card = CardWidget()
+        h = QHBoxLayout(card)
+        h.setContentsMargins(16, 10, 16, 10)
+
+        source_label = {"telegram": "Telegram", "local_import": "Local import"}.get(
+            entry.get("source_type"), entry.get("source_type", "")
+        )
+        text_col = QVBoxLayout()
+        title = f"{entry.get('added', 0)}/{entry.get('requested', 0)} cards - {entry.get('deck', '')} ({entry.get('notetype', '')})"
+        text_col.addWidget(StrongBodyLabel(title))
+        subtitle = f"{entry.get('timestamp', '')} - {source_label}"
+        if entry.get("source"):
+            subtitle += f" - {entry['source']}"
+        caption = CaptionLabel(subtitle)
+        caption.setWordWrap(True)
+        text_col.addWidget(caption)
+        h.addLayout(text_col, 1)
+
+        note_ids = entry.get("note_ids", [])
+        browse_btn = PushButton(FluentIcon.SEARCH, "Browse")
+        browse_btn.setAutoDefault(False)
+        browse_btn.setEnabled(bool(note_ids))
+        browse_btn.clicked.connect(lambda checked=False, ids=note_ids: self.on_browse(ids))
+        h.addWidget(browse_btn)
+
+        delete_btn = PushButton(FluentIcon.DELETE, "Delete")
+        delete_btn.setAutoDefault(False)
+        delete_btn.setEnabled(bool(note_ids))
+        delete_btn.clicked.connect(lambda checked=False, ids=note_ids: self.on_delete(ids))
+        h.addWidget(delete_btn)
+
+        return card
+
+    def on_browse(self, note_ids) -> None:
+        if not note_ids:
+            return
+        query = "nid:" + ",".join(str(i) for i in note_ids)
+        try:
+            bridge.anki_request("guiBrowse", query=query)
+        except Exception as e:
+            InfoBar.error("Error", f"Couldn't open the Anki browser: {e}", position=InfoBarPosition.TOP, parent=self.window())
+
+    def on_delete(self, note_ids) -> None:
+        if not note_ids:
+            return
+        box = MessageBox("Confirm", f"Permanently delete {len(note_ids)} card(s) from Anki?", self.window())
+        if not box.exec():
+            return
+        try:
+            bridge.delete_history_batch(note_ids)
+        except Exception as e:
+            InfoBar.error("Error", f"Couldn't delete cards: {e}", position=InfoBarPosition.TOP, parent=self.window())
+            return
+        InfoBar.success("Deleted", f"{len(note_ids)} card(s) deleted.", position=InfoBarPosition.TOP, parent=self.window())
+        self.refresh()
+
+
+DUPLICATE_MODE_CHOICES = [
+    ("Preserve (skip duplicates)", "preserve"),
+    ("Update existing note", "update"),
+    ("Always add (allow duplicates)", "duplicate"),
+]
+MATCH_SCOPE_CHOICES = [
+    ("Note type + deck", "notetype_deck"),
+    ("Note type only (whole collection)", "notetype"),
+]
 
 
 class SettingsInterface(QWidget):
@@ -240,10 +483,25 @@ class SettingsInterface(QWidget):
         self.auto_mode_switch = SwitchButton()
         self.auto_mode_switch.setChecked(config.AUTO_MODE)
 
+        self.duplicate_combo = ComboBox()
+        self.duplicate_combo.addItems([label for label, _ in DUPLICATE_MODE_CHOICES])
+        dup_index = next((i for i, (_, v) in enumerate(DUPLICATE_MODE_CHOICES) if v == config.DUPLICATE_MODE), 0)
+        self.duplicate_combo.setCurrentIndex(dup_index)
+
+        self.match_scope_combo = ComboBox()
+        self.match_scope_combo.addItems([label for label, _ in MATCH_SCOPE_CHOICES])
+        scope_index = next((i for i, (_, v) in enumerate(MATCH_SCOPE_CHOICES) if v == config.MATCH_SCOPE), 0)
+        self.match_scope_combo.setCurrentIndex(scope_index)
+
+        self.allow_html_switch = SwitchButton()
+        self.allow_html_switch.setChecked(config.ALLOW_HTML)
+
         layout.addWidget(self._labeled_row(t("label_token"), self.token_edit))
         layout.addWidget(self._labeled_row(t("label_chat_id"), chat_id_row_widget))
         layout.addWidget(self._labeled_row(t("label_deck"), self.deck_combo))
         layout.addWidget(self._labeled_row(t("label_notetype"), self.notetype_combo))
+        layout.addWidget(self._labeled_row("Duplicate Handling", self.duplicate_combo))
+        layout.addWidget(self._labeled_row("Match Scope", self.match_scope_combo))
 
         guide_row = CardWidget()
         guide_layout = QHBoxLayout(guide_row)
@@ -267,6 +525,17 @@ class SettingsInterface(QWidget):
         auto_layout.addStretch(1)
         auto_layout.addWidget(self.auto_mode_switch)
         layout.addWidget(auto_row)
+
+        html_row = CardWidget()
+        html_layout = QHBoxLayout(html_row)
+        html_layout.setContentsMargins(16, 12, 16, 12)
+        html_text = QVBoxLayout()
+        html_text.addWidget(StrongBodyLabel("Allow HTML in fields"))
+        html_text.addWidget(CaptionLabel("When off, characters like < > & are escaped so they show as plain text instead of being treated as HTML."))
+        html_layout.addLayout(html_text)
+        html_layout.addStretch(1)
+        html_layout.addWidget(self.allow_html_switch)
+        layout.addWidget(html_row)
 
         layout.addStretch(1)
 
@@ -338,6 +607,9 @@ class SettingsInterface(QWidget):
         config.save_setting("DEFAULT_DECK", self.deck_combo.currentText().strip() or "Default")
         config.save_setting("DEFAULT_NOTE_TYPE", self.notetype_combo.currentText().strip() or "Basic")
         config.save_setting("AUTO_MODE", self.auto_mode_switch.isChecked())
+        config.save_setting("DUPLICATE_MODE", DUPLICATE_MODE_CHOICES[self.duplicate_combo.currentIndex()][1])
+        config.save_setting("MATCH_SCOPE", MATCH_SCOPE_CHOICES[self.match_scope_combo.currentIndex()][1])
+        config.save_setting("ALLOW_HTML", self.allow_html_switch.isChecked())
 
         InfoBar.success(t("settings_saved_title"), t("settings_saved_body"), position=InfoBarPosition.TOP, parent=self.window())
 
@@ -503,13 +775,16 @@ class MainWindow(FluentWindow):
         self.settings_interface = SettingsInterface(self)
         self.about_interface = AboutInterface(self)
         self.guide_interface = GuideInterface(self)
+        self.import_interface = ImportInterface(self)
+        self.history_interface = HistoryInterface(self)
 
+        self.review_interface = ReviewInterface(self)
         if items:
-            self.review_interface = ReviewInterface(items, new_offset, self)
-            self.addSubInterface(self.review_interface, FluentIcon.SYNC, t("nav_review"))
-        else:
-            self.review_interface = None
+            self.review_interface.set_items(items, new_offset)
 
+        self.addSubInterface(self.review_interface, FluentIcon.SYNC, t("nav_review"))
+        self.addSubInterface(self.import_interface, FluentIcon.FOLDER, "Import")
+        self.addSubInterface(self.history_interface, FluentIcon.HISTORY, "History")
         self.addSubInterface(self.guide_interface, FluentIcon.BOOK_SHELF, "Guide")
         self.addSubInterface(self.settings_interface, FluentIcon.SETTING, t("nav_settings"), NavigationItemPosition.BOTTOM)
         self.addSubInterface(self.about_interface, FluentIcon.INFO, "About", NavigationItemPosition.BOTTOM)

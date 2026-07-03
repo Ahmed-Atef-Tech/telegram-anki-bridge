@@ -19,6 +19,7 @@ else:
 ENV_FILE = BASE_DIR / ".env"
 STATE_FILE = BASE_DIR / "telegram_offset.txt"
 LOG_FILE = BASE_DIR / "bridge.log"
+HISTORY_FILE = BASE_DIR / "import_history.json"
 
 if not ENV_FILE.exists():
     ENV_FILE.touch()
@@ -43,6 +44,12 @@ def _load() -> None:
 
     g["AUTO_MODE"] = os.getenv("AUTO_MODE", "false").strip().lower() in ("1", "true", "yes")
     g["FIRST_RUN_DONE"] = os.getenv("FIRST_RUN_DONE", "false").strip().lower() in ("1", "true", "yes")
+
+    # "preserve" (سيب القديم زي ما هو - default), "update" (حدّث القديم), "duplicate" (زوّد نسخة تانية)
+    g["DUPLICATE_MODE"] = os.getenv("DUPLICATE_MODE", "preserve").strip().lower()
+    # "notetype" (كل الكوليكشن) أو "notetype_deck" (الديك المحدد بس)
+    g["MATCH_SCOPE"] = os.getenv("MATCH_SCOPE", "notetype_deck").strip().lower()
+    g["ALLOW_HTML"] = os.getenv("ALLOW_HTML", "true").strip().lower() in ("1", "true", "yes")
 
     g["ANKI_STARTUP_TIMEOUT_SEC"] = int(os.getenv("ANKI_STARTUP_TIMEOUT_SEC", "40"))
     g["TELEGRAM_REQUEST_TIMEOUT_SEC"] = int(os.getenv("TELEGRAM_REQUEST_TIMEOUT_SEC", "15"))
